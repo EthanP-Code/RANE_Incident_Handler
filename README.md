@@ -1,45 +1,93 @@
-# RANE Incident Triage API
+# RANE — Incident Triage Copilot
 
-The backend serves incident queue, replay, analysis, and engineer action
-history. It reads the ServiceNow event dataset as a CSV with one row per update.
+RANE is a local incident command center with a FastAPI backend and a responsive,
+buildless HTML/CSS/JavaScript frontend. It supports historical incident replay,
+Gemma-backed triage or explicitly labeled deterministic demo guidance, and
+persistent engineer decisions. It does not autonomously resolve incidents.
 
 ## Run locally
 
+From the repository root, with Python 3.11+:
+
 ```sh
-cd backend
 python3 -m venv .venv
 source .venv/bin/activate
-pip install -e '.[test]'
-RANE_ACTIONS_DB=data/rane_actions.sqlite3 \
-GEMMA_API_KEY=your_google_ai_studio_key \
-uvicorn rane_api.main:app --reload
+pip install -e './backend[test]'
+python run.py
 ```
 
-By default, the backend loads `incident_event_log.csv` from the repository root.
-Set `RANE_INCIDENTS_CSV` to point to another copy of the CSV. `RANE_ACTIONS_DB`
-defaults to `backend/data/rane_actions.sqlite3`. Set `GEMMA_MODEL` to override
-the default `gemma-3-12b-it`.
+Open <http://127.0.0.1:8000>; API documentation is at `/docs`. The backend
+loads `incident_event_log.csv` from the repository root by default. Override
+the path with `RANE_INCIDENTS_CSV`. The SQLite action database defaults to
+`backend/data/rane_actions.sqlite3` and can be changed with `RANE_ACTIONS_DB`.
 
-The supplied event log has 36 columns and uses `number` as the incident ID,
-`sys_updated_at` as the event timestamp, and day/month/year timestamps such as
-`4/5/2016 08:57`. Numeric prefixes in values such as `1 - Critical` and
-`2 - Medium` are normalized into their readable labels. `Incident_response.txt`
-describes the CSV attributes.
+The supplied CSV contains 119,998 event records across 20,769 unique incidents.
+`Incident_response.txt` documents its fields. The loader handles day-first
+timestamps, numeric-labeled priority/impact/urgency, and anonymized fields.
+Do not interpret category/symptom IDs as readable descriptions.
 
-The dataset contains incident metadata rather than application logs, metrics,
-or runbooks. Category and symptom values are anonymized identifiers. The API
-does not send `resolved_at`, `closed_at`, or later events to Gemma during
-historical replay.
+## Demo workflow
 
-## Endpoints
+1. Filter/search the queue for `INC0025693` and open its incident detail.
+2. Use the replay timestamp to compare incident state before and after priority
+   escalation. The queue, detail, and analysis use the selected time cutoff.
+3. Choose **Demo Mode** for deterministic investigation suggestions, or **Live
+   Mode** when a model deployment is configured. Demo responses are explicitly
+   labeled and do not represent model inference.
+4. Review hypotheses, evidence, missing information, and recommended actions.
+   Accept or dismiss actions, record an investigation note, and mark the replay
+   point investigated.
+5. Review persistent decisions in Activity History. Engineer actions never
+   trigger infrastructure changes.
 
-| Method | Path | Purpose |
-| --- | --- | --- |
-| `GET` | `/health` | Dataset, event, and incident counts plus Gemma configuration |
-| `GET` | `/api/incidents?priority=Critical&limit=50&offset=0` | Latest incident snapshots and priority counts |
-| `GET` | `/api/incidents/{id}?as_of=2016-05-04T08:57:00Z` | Point-in-time snapshot and event timeline |
-| `POST` | `/api/incidents/{id}/analyze?as_of=...` | Structured Gemma analysis from replay-visible data |
-| `GET` | `/api/incidents/{id}/actions` | Engineer action history |
-| `POST` | `/api/incidents/{id}/actions` | Record `accept`, `dismiss`, `investigated`, or `note` |
+## Model configuration
 
-Run tests from `backend` with `pytest`.
+The default is Demo Mode unless live provider configuration is complete. Copy
+`.env.example` to `.env`, set server-side values, and restart the application.
+`run.py` loads the root `.env` file.
+
+| Variable | Purpose |
+| --- | --- |
+| `GEMMA_PROVIDER` | `digitalocean` (default) or `google` |
+| `GEMMA_ENDPOINT` | Complete HTTPS chat-completions URL for the deployed model; required for DigitalOcean |
+| `GEMMA_API_KEY` | Server-side provider credential |
+| `GEMMA_MODEL` | Deployed model ID |
+| `RANE_INCIDENTS_CSV` | Optional CSV path; defaults to `incident_event_log.csv` in the repository root |
+| `RANE_ACTIONS_DB` | Optional SQLite database path |
+
+Configuration presence does not prove that the endpoint works or hosts Gemma;
+verify the deployment before presenting it as live inference. Live provider
+failures are explicit and never silently substituted with demo output.
+
+## Replay and data integrity
+
+- CSV rows are incident events. Queue counts and snapshots aggregate by
+  incident ID at the selected replay time; equal-timestamp rows use
+  `sys_mod_count` ordering.
+- Day-first source timestamps have no timezone and are treated as UTC internally
+  without changing their clock values.
+- Only allowlisted metadata is supplied to the model. Resolution/closure
+  timestamps, resolution codes, resolved-by values, SLA outcomes, and later
+  events are excluded—even if outcome columns are already populated in earlier
+  CSV rows.
+- The data contains no application logs, metrics, service-name mappings, or
+  runbooks. Causes remain hypotheses; recommended steps are investigations, not
+  remediation instructions.
+- Missing datasets produce an actionable empty state. No fabricated incidents
+  are used by the application.
+
+Dataset attribution: Amaral, C., Fantinato, M., and Peres, S., [Incident
+management process enriched event log](https://archive.ics.uci.edu/dataset/498/incident+management+process+enriched+event+log),
+UCI Machine Learning Repository, [DOI 10.24432/C57S4H](https://doi.org/10.24432/C57S4H),
+CC BY 4.0.
+
+## Verify
+
+```sh
+python -m pytest backend/tests -q
+node --check backend/frontend/app.js
+```
+
+Live model inference has not been verified without deployment credentials.
+This is a local hackathon MVP; authentication, production telemetry, and
+automated remediation are outside its scope.

@@ -1,6 +1,8 @@
+from bisect import bisect_right
 import csv
 from collections import Counter
 from datetime import datetime, timezone
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -18,11 +20,11 @@ _ALIASES: dict[str, tuple[str, ...]] = {
         "timestamp",
         "opened_at",
     ),
-    "opened_at": ("opened_at",),
     "priority": ("priority", "u_priority"),
     "category": ("category", "u_category"),
-    "subcategory": ("subcategory",),
     "symptom": ("symptom", "u_symptom"),
+    "subcategory": ("subcategory",),
+    "opened_at": ("opened_at", "sys_created_at"),
     "assignment_group": ("assignment_group", "group", "group_id"),
     "assigned_to": ("assigned_to", "assignee"),
     "status": ("status", "state", "incident_state"),
@@ -42,14 +44,15 @@ _TIMELINE_FIELDS = (
     "assigned_to",
     "impact",
     "urgency",
-    "category",
-    "subcategory",
-    "symptom",
-    "configuration_item",
     "reassignment_count",
     "reopen_count",
     "update_count",
     "active",
+    "contact_type",
+    "configuration_item",
+    "category",
+    "subcategory",
+    "symptom",
 )
 _PRIORITIES = {
     "1": "Critical",
@@ -61,6 +64,7 @@ _PRIORITIES = {
 _LEVELS = {"1": "High", "2": "Medium", "3": "Low"}
 
 
+@lru_cache(maxsize=100000)
 def _parse_timestamp(value: str) -> datetime | None:
     value = value.strip()
     if not value:
@@ -68,12 +72,7 @@ def _parse_timestamp(value: str) -> datetime | None:
     try:
         parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
     except ValueError:
-        for pattern in (
-            "%d/%m/%Y %H:%M",
-            "%d/%m/%Y %H:%M:%S",
-            "%m/%d/%Y %H:%M:%S",
-            "%Y-%m-%d %H:%M:%S",
-        ):
+        for pattern in ("%d/%m/%Y %H:%M", "%d/%m/%Y %H:%M:%S"):
             try:
                 parsed = datetime.strptime(value, pattern)
                 break
@@ -97,7 +96,7 @@ def _normalize_row(row: dict[str, str]) -> dict[str, str]:
 def _field(row: dict[str, str], name: str) -> str | None:
     for alias in _ALIASES[name]:
         value = row.get(alias)
-        if value and value.strip().lower() not in {"?", "null", "none", "nan"}:
+        if value and value.strip().lower() not in {"?", "null", "none", "nan", "n/a"}:
             return value
     return None
 
@@ -106,10 +105,9 @@ def _priority(value: str | None) -> str | None:
     if value is None:
         return None
     normalized = value.strip()
-    if " - " in normalized:
-        code, label = normalized.split(" - ", 1)
-        if code.strip().isdigit():
-            normalized = label.strip()
+    code, separator, label = normalized.partition(" - ")
+    if separator and code.strip().isdigit():
+        return _PRIORITIES.get(code.strip(), label.strip())
     return _PRIORITIES.get(normalized, normalized)
 
 
@@ -117,10 +115,9 @@ def _level(value: str | None) -> str | None:
     if value is None:
         return None
     normalized = value.strip()
-    if " - " in normalized:
-        code, label = normalized.split(" - ", 1)
-        if code.strip().isdigit():
-            normalized = label.strip()
+    code, separator, label = normalized.partition(" - ")
+    if separator and code.strip().isdigit():
+        return _LEVELS.get(code.strip(), label.strip())
     return _LEVELS.get(normalized, normalized)
 
 
@@ -146,6 +143,8 @@ def _boolean(row: dict[str, str], name: str) -> bool | None:
 
 def _snapshot(row: dict[str, str], incident_id: str, observed_at: datetime) -> IncidentSnapshot:
     opened_at = _parse_timestamp(_field(row, "opened_at") or "")
+    if opened_at is not None and opened_at > observed_at:
+        opened_at = None
     return IncidentSnapshot(
         incident_id=incident_id,
         observed_at=observed_at,
@@ -153,7 +152,7 @@ def _snapshot(row: dict[str, str], incident_id: str, observed_at: datetime) -> I
         priority=_priority(_field(row, "priority")),
         category=_field(row, "category"),
         subcategory=_field(row, "subcategory"),
-        symptom=_field(row, "symptom") or _field(row, "subcategory"),
+        symptom=_field(row, "symptom"),
         assignment_group=_field(row, "assignment_group"),
         assigned_to=_field(row, "assigned_to"),
         status=_field(row, "status"),
@@ -172,6 +171,7 @@ class IncidentRepository:
     def __init__(self, csv_path: Path) -> None:
         self.csv_path = csv_path
         self._events: dict[str, list[IncidentSnapshot]] = {}
+        self.skipped_rows = 0
         self._load()
 
     @property
@@ -189,23 +189,53 @@ class IncidentRepository:
     def _load(self) -> None:
         if not self.csv_path.is_file():
             return
-        events: dict[str, list[IncidentSnapshot]] = {}
+        events: dict[str, list[tuple[int, IncidentSnapshot]]] = {}
         with self.csv_path.open(newline="", encoding="utf-8-sig") as csv_file:
             reader = csv.DictReader(csv_file)
             if not reader.fieldnames:
                 raise ValueError(f"Incident CSV has no header: {self.csv_path}")
+            columns = {name.strip().lower() for name in reader.fieldnames}
+            if not columns.intersection(_ALIASES["incident_id"]) or not columns.intersection(_ALIASES["observed_at"]):
+                raise ValueError("Incident CSV needs an incident identifier and an event timestamp column")
             for raw_row in reader:
                 row = _normalize_row(raw_row)
                 incident_id = _field(row, "incident_id")
                 observed_at_value = _field(row, "observed_at")
                 observed_at = _parse_timestamp(observed_at_value or "")
                 if incident_id is None or observed_at is None:
+                    self.skipped_rows += 1
                     continue
                 snapshot = _snapshot(row, incident_id, observed_at)
-                events.setdefault(incident_id, []).append(snapshot)
-        for history in events.values():
-            history.sort(key=lambda event: event.observed_at)
-        self._events = events
+                sequence = row.get("sys_mod_count", "")
+                events.setdefault(incident_id, []).append((int(sequence) if sequence.isdigit() else 0, snapshot))
+        self._events = {
+            key: [event for _, event in sorted(history, key=lambda item: (item[1].observed_at, item[0]))]
+            for key, history in events.items()
+        }
+        self._times = {key: [event.observed_at for event in history] for key, history in self._events.items()}
+
+    def metadata(self) -> dict[str, Any]:
+        if not self.available:
+            return {"dataset_loaded": False, "dataset_file": self.csv_path.name}
+        demo_id = "INC0025693" if "INC0025693" in self._events else next(
+            (key for key, history in self._events.items() if len(history) > 2 and any(e.priority == "Critical" for e in history)),
+            next(iter(self._events)),
+        )
+        history = self._events[demo_id]
+        candidates = [e for e in history if e.priority == "Critical" and e.status not in ("Resolved", "Closed", "Canceled")]
+        demo_event = candidates[min(7, len(candidates) - 1)] if candidates else history[0]
+        return {
+            "dataset_loaded": True,
+            "dataset_file": self.csv_path.name,
+            "total_events": sum(len(h) for h in self._events.values()),
+            "total_incidents": len(self._events),
+            "skipped_rows": self.skipped_rows,
+            "first_event": min(h[0].observed_at for h in self._events.values()),
+            "last_event": max(h[-1].observed_at for h in self._events.values()),
+            "default_incident": demo_id,
+            "default_as_of": demo_event.observed_at,
+            "time_basis": "Source timestamps; timezone unspecified (treated as UTC for replay).",
+        }
 
     def _require_data(self) -> None:
         if not self.available:
@@ -219,21 +249,38 @@ class IncidentRepository:
         priority: str | None,
         limit: int,
         offset: int,
+        as_of: datetime | None = None,
+        search: str = "",
     ) -> tuple[list[IncidentSnapshot], int, dict[str, int]]:
         self._require_data()
-        latest = [history[-1] for history in self._events.values()]
+        if as_of is not None and as_of.tzinfo is None:
+            as_of = as_of.replace(tzinfo=timezone.utc)
+        latest = []
+        for key, history in self._events.items():
+            index = len(history) if as_of is None else bisect_right(self._times[key], as_of)
+            if index:
+                latest.append(history[index - 1])
         counts = Counter(
             incident.priority
             for incident in latest
             if incident.priority in ("Critical", "High")
         )
+        unique_count = len(latest)
+        unresolved = sum(incident.status not in (None, "Resolved", "Closed", "Canceled", "Cancelled") for incident in latest)
         if priority:
             latest = [incident for incident in latest if incident.priority == priority]
-        latest.sort(key=lambda incident: (incident.observed_at, incident.incident_id), reverse=True)
+        if search:
+            latest = [incident for incident in latest if search.casefold() in incident.incident_id.casefold()]
+        latest.sort(key=lambda incident: (
+            list(_PRIORITIES.values()).index(incident.priority) if incident.priority in _PRIORITIES.values() else 9,
+            incident.status in ("Resolved", "Closed", "Canceled"),
+            -incident.observed_at.timestamp(), incident.incident_id,
+        ))
         return latest[offset : offset + limit], len(latest), {
             "critical": counts["Critical"],
             "high": counts["High"],
-            "unique_incidents": len(self._events),
+            "unique_incidents": unique_count,
+            "unresolved": unresolved,
         }
 
     def timeline(
@@ -259,7 +306,7 @@ class IncidentRepository:
                 for field in _TIMELINE_FIELDS:
                     current_value = getattr(snapshot, field)
                     if current_value != getattr(previous, field):
-                        changes[field] = current_value
+                        changes[field] = str(current_value) if current_value is not None else None
             timeline.append(
                 TimelineEvent(
                     observed_at=snapshot.observed_at,
@@ -273,6 +320,7 @@ class IncidentRepository:
     def replay_payload(self, incident_id: str, as_of: datetime | None) -> dict[str, Any]:
         snapshot, timeline = self.timeline(incident_id, as_of)
         return {
+            "replay_as_of": (as_of or snapshot.observed_at).isoformat(),
             "incident": snapshot.model_dump(mode="json"),
             "timeline": [event.model_dump(mode="json") for event in timeline],
             "limitations": [
