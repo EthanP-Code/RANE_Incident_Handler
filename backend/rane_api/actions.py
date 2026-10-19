@@ -23,6 +23,10 @@ class ActionRepository:
                 )
                 """
             )
+            columns = {row[1] for row in connection.execute("PRAGMA table_info(incident_actions)")}
+            for column in ("replay_as_of", "analysis_mode"):
+                if column not in columns:
+                    connection.execute(f"ALTER TABLE incident_actions ADD COLUMN {column} TEXT")
 
     def _connect(self) -> sqlite3.Connection:
         connection = sqlite3.connect(self.database_path)
@@ -35,8 +39,8 @@ class ActionRepository:
             cursor = connection.execute(
                 """
                 INSERT INTO incident_actions
-                    (incident_id, kind, description, recommendation, created_at)
-                VALUES (?, ?, ?, ?, ?)
+                    (incident_id, kind, description, recommendation, created_at, replay_as_of, analysis_mode)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     incident_id,
@@ -44,6 +48,8 @@ class ActionRepository:
                     action.description,
                     action.recommendation,
                     created_at.isoformat(),
+                    action.replay_as_of.isoformat() if action.replay_as_of else None,
+                    action.analysis_mode,
                 ),
             )
             action_id = cursor.lastrowid
@@ -54,17 +60,19 @@ class ActionRepository:
             description=action.description,
             recommendation=action.recommendation,
             created_at=created_at,
+            replay_as_of=action.replay_as_of,
+            analysis_mode=action.analysis_mode,
         )
 
-    def list(self, incident_id: str) -> list[IncidentAction]:
+    def list(self, incident_id: str | None = None, limit: int = 500) -> list[IncidentAction]:
         with closing(self._connect()) as connection, connection:
             rows = connection.execute(
                 """
-                SELECT id, incident_id, kind, description, recommendation, created_at
+                SELECT *
                 FROM incident_actions
-                WHERE incident_id = ?
-                ORDER BY id
+                WHERE (? IS NULL OR incident_id = ?)
+                ORDER BY id DESC LIMIT ?
                 """,
-                (incident_id,),
+                (incident_id, incident_id, limit),
             ).fetchall()
         return [IncidentAction.model_validate(dict(row)) for row in rows]

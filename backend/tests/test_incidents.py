@@ -54,7 +54,7 @@ def test_queue_aggregates_latest_snapshot_per_incident(tmp_path):
     rows, total, counts = repository.queue(None, 50, 0)
 
     assert total == 2
-    assert counts == {"critical": 1, "high": 1, "unique_incidents": 2}
+    assert counts == {"critical": 1, "high": 1, "unique_incidents": 2, "unresolved": 2}
     assert {incident.incident_id: incident.priority for incident in rows} == {
         "INC001": "Critical",
         "INC002": "High",
