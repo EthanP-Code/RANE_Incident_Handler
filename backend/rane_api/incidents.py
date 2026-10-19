@@ -18,15 +18,22 @@ _ALIASES: dict[str, tuple[str, ...]] = {
         "timestamp",
         "opened_at",
     ),
+    "opened_at": ("opened_at",),
     "priority": ("priority", "u_priority"),
     "category": ("category", "u_category"),
-    "symptom": ("symptom", "subcategory", "u_symptom"),
+    "subcategory": ("subcategory",),
+    "symptom": ("symptom", "u_symptom"),
     "assignment_group": ("assignment_group", "group", "group_id"),
     "assigned_to": ("assigned_to", "assignee"),
     "status": ("status", "state", "incident_state"),
     "impact": ("impact", "u_impact"),
     "urgency": ("urgency", "u_urgency"),
     "reassignment_count": ("reassignment_count", "reassignments"),
+    "reopen_count": ("reopen_count",),
+    "update_count": ("sys_mod_count", "update_count"),
+    "active": ("active",),
+    "contact_type": ("contact_type",),
+    "configuration_item": ("cmdb_ci", "configuration_item"),
 }
 _TIMELINE_FIELDS = (
     "priority",
@@ -35,6 +42,14 @@ _TIMELINE_FIELDS = (
     "assigned_to",
     "impact",
     "urgency",
+    "category",
+    "subcategory",
+    "symptom",
+    "configuration_item",
+    "reassignment_count",
+    "reopen_count",
+    "update_count",
+    "active",
 )
 _PRIORITIES = {
     "1": "Critical",
@@ -53,7 +68,12 @@ def _parse_timestamp(value: str) -> datetime | None:
     try:
         parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
     except ValueError:
-        for pattern in ("%m/%d/%Y %H:%M:%S", "%Y-%m-%d %H:%M:%S"):
+        for pattern in (
+            "%d/%m/%Y %H:%M",
+            "%d/%m/%Y %H:%M:%S",
+            "%m/%d/%Y %H:%M:%S",
+            "%Y-%m-%d %H:%M:%S",
+        ):
             try:
                 parsed = datetime.strptime(value, pattern)
                 break
@@ -77,7 +97,7 @@ def _normalize_row(row: dict[str, str]) -> dict[str, str]:
 def _field(row: dict[str, str], name: str) -> str | None:
     for alias in _ALIASES[name]:
         value = row.get(alias)
-        if value:
+        if value and value.strip().lower() not in {"?", "null", "none", "nan"}:
             return value
     return None
 
@@ -86,6 +106,10 @@ def _priority(value: str | None) -> str | None:
     if value is None:
         return None
     normalized = value.strip()
+    if " - " in normalized:
+        code, label = normalized.split(" - ", 1)
+        if code.strip().isdigit():
+            normalized = label.strip()
     return _PRIORITIES.get(normalized, normalized)
 
 
@@ -93,27 +117,54 @@ def _level(value: str | None) -> str | None:
     if value is None:
         return None
     normalized = value.strip()
+    if " - " in normalized:
+        code, label = normalized.split(" - ", 1)
+        if code.strip().isdigit():
+            normalized = label.strip()
     return _LEVELS.get(normalized, normalized)
 
 
-def _snapshot(row: dict[str, str], incident_id: str, observed_at: datetime) -> IncidentSnapshot:
-    reassignment_count = _field(row, "reassignment_count")
+def _integer(row: dict[str, str], name: str) -> int | None:
+    value = _field(row, name)
     try:
-        count = int(reassignment_count) if reassignment_count is not None else None
+        return int(value) if value is not None else None
     except ValueError:
-        count = None
+        return None
+
+
+def _boolean(row: dict[str, str], name: str) -> bool | None:
+    value = _field(row, name)
+    if value is None:
+        return None
+    normalized = value.strip().lower()
+    if normalized in {"true", "1", "yes"}:
+        return True
+    if normalized in {"false", "0", "no"}:
+        return False
+    return None
+
+
+def _snapshot(row: dict[str, str], incident_id: str, observed_at: datetime) -> IncidentSnapshot:
+    opened_at = _parse_timestamp(_field(row, "opened_at") or "")
     return IncidentSnapshot(
         incident_id=incident_id,
         observed_at=observed_at,
+        opened_at=opened_at,
         priority=_priority(_field(row, "priority")),
         category=_field(row, "category"),
-        symptom=_field(row, "symptom"),
+        subcategory=_field(row, "subcategory"),
+        symptom=_field(row, "symptom") or _field(row, "subcategory"),
         assignment_group=_field(row, "assignment_group"),
         assigned_to=_field(row, "assigned_to"),
         status=_field(row, "status"),
         impact=_level(_field(row, "impact")),
         urgency=_level(_field(row, "urgency")),
-        reassignment_count=count,
+        reassignment_count=_integer(row, "reassignment_count"),
+        reopen_count=_integer(row, "reopen_count"),
+        update_count=_integer(row, "update_count"),
+        active=_boolean(row, "active"),
+        contact_type=_field(row, "contact_type"),
+        configuration_item=_field(row, "configuration_item"),
     )
 
 
@@ -126,6 +177,14 @@ class IncidentRepository:
     @property
     def available(self) -> bool:
         return bool(self._events)
+
+    @property
+    def event_count(self) -> int:
+        return sum(len(history) for history in self._events.values())
+
+    @property
+    def unique_incident_count(self) -> int:
+        return len(self._events)
 
     def _load(self) -> None:
         if not self.csv_path.is_file():
@@ -217,7 +276,8 @@ class IncidentRepository:
             "incident": snapshot.model_dump(mode="json"),
             "timeline": [event.model_dump(mode="json") for event in timeline],
             "limitations": [
-                "The dataset contains incident metadata, not application logs or infrastructure metrics.",
+                "The dataset contains incident metadata, not application logs, infrastructure metrics, or runbooks.",
+                "Category and symptom values are anonymized identifiers, not descriptive text.",
                 "Possible causes are hypotheses and must be verified by an engineer.",
             ],
         }

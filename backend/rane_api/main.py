@@ -18,19 +18,21 @@ from .schemas import (
 )
 
 
-def _configured_path(variable: str, fallback: str) -> Path:
-    value = os.getenv(variable, fallback)
-    path = Path(value).expanduser()
+def _configured_path(variable: str, fallback: Path) -> Path:
+    value = os.getenv(variable)
+    path = Path(value).expanduser() if value else fallback
     return path if path.is_absolute() else Path.cwd() / path
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    backend_dir = Path(__file__).resolve().parents[1]
+    repository_root = backend_dir.parent
     incident_path = _configured_path(
-        "RANE_INCIDENTS_CSV", "data/incident_events.csv"
+        "RANE_INCIDENTS_CSV", repository_root / "incident_event_log.csv"
     )
     action_path = _configured_path(
-        "RANE_ACTIONS_DB", "data/rane_actions.sqlite3"
+        "RANE_ACTIONS_DB", backend_dir / "data" / "rane_actions.sqlite3"
     )
     try:
         app.state.incidents = IncidentRepository(incident_path)
@@ -50,6 +52,8 @@ def health(request: Request) -> dict[str, object]:
         "status": "ok",
         "dataset_loaded": incidents.available,
         "dataset_path": str(incidents.csv_path),
+        "events_loaded": incidents.event_count,
+        "unique_incidents": incidents.unique_incident_count,
         "gemma_configured": bool(os.getenv("GEMMA_API_KEY")),
     }
 

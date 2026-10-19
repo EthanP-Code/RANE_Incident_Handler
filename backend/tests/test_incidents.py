@@ -46,6 +46,59 @@ def _write_dataset(path):
         writer.writerows(rows)
 
 
+def _write_source_format_dataset(path):
+    rows = [
+        {
+            "number": "INC0025693",
+            "incident_state": "New",
+            "active": "true",
+            "reassignment_count": "0",
+            "reopen_count": "0",
+            "sys_mod_count": "0",
+            "opened_at": "4/5/2016 08:57",
+            "sys_updated_at": "4/5/2016 08:57",
+            "contact_type": "Phone",
+            "category": "Category 20",
+            "subcategory": "Subcategory 170",
+            "u_symptom": "Symptom 491",
+            "cmdb_ci": "?",
+            "impact": "2 - Medium",
+            "urgency": "2 - Medium",
+            "priority": "3 - Moderate",
+            "assignment_group": "Group 70",
+            "assigned_to": "?",
+            "resolved_at": "4/5/2016 12:00",
+            "closed_at": "5/5/2016 12:00",
+        },
+        {
+            "number": "INC0025693",
+            "incident_state": "New",
+            "active": "true",
+            "reassignment_count": "1",
+            "reopen_count": "0",
+            "sys_mod_count": "2",
+            "opened_at": "4/5/2016 08:57",
+            "sys_updated_at": "4/5/2016 08:59",
+            "contact_type": "Phone",
+            "category": "Category 20",
+            "subcategory": "Subcategory 170",
+            "u_symptom": "Symptom 491",
+            "cmdb_ci": "?",
+            "impact": "1 - High",
+            "urgency": "1 - High",
+            "priority": "1 - Critical",
+            "assignment_group": "Group 72",
+            "assigned_to": "?",
+            "resolved_at": "4/5/2016 12:00",
+            "closed_at": "5/5/2016 12:00",
+        },
+    ]
+    with path.open("w", newline="") as output:
+        writer = csv.DictWriter(output, fieldnames=rows[0].keys())
+        writer.writeheader()
+        writer.writerows(rows)
+
+
 def test_queue_aggregates_latest_snapshot_per_incident(tmp_path):
     csv_path = tmp_path / "incidents.csv"
     _write_dataset(csv_path)
@@ -90,6 +143,37 @@ def test_timeline_records_priority_and_assignment_changes(tmp_path):
         "impact": "High",
         "urgency": "High",
     }
+
+
+def test_source_csv_format_parses_dates_and_labeled_values_without_future_fields(tmp_path):
+    csv_path = tmp_path / "incident_event_log.csv"
+    _write_source_format_dataset(csv_path)
+    repository = IncidentRepository(csv_path)
+
+    before_escalation, earlier_timeline = repository.timeline(
+        "INC0025693", datetime(2016, 5, 4, 8, 57, tzinfo=timezone.utc)
+    )
+    after_escalation, full_timeline = repository.timeline(
+        "INC0025693", datetime(2016, 5, 4, 8, 59, tzinfo=timezone.utc)
+    )
+    context = repository.replay_payload(
+        "INC0025693", datetime(2016, 5, 4, 8, 57, tzinfo=timezone.utc)
+    )
+
+    assert before_escalation.priority == "Moderate"
+    assert before_escalation.impact == "Medium"
+    assert before_escalation.urgency == "Medium"
+    assert before_escalation.symptom == "Symptom 491"
+    assert before_escalation.assigned_to is None
+    assert before_escalation.opened_at == datetime(
+        2016, 5, 4, 8, 57, tzinfo=timezone.utc
+    )
+    assert len(earlier_timeline) == 1
+    assert after_escalation.priority == "Critical"
+    assert len(full_timeline) == 2
+    assert "closed_at" not in str(context)
+    assert "resolved_at" not in str(context)
+    assert "Critical" not in str(context)
 
 
 def test_api_replay_and_action_audit(tmp_path, monkeypatch):

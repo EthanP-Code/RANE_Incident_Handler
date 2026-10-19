@@ -7,8 +7,10 @@ from pydantic import BaseModel, ConfigDict, Field
 class IncidentSnapshot(BaseModel):
     incident_id: str
     observed_at: datetime
+    opened_at: datetime | None = None
     priority: str | None = None
     category: str | None = None
+    subcategory: str | None = None
     symptom: str | None = None
     assignment_group: str | None = None
     assigned_to: str | None = None
@@ -16,6 +18,11 @@ class IncidentSnapshot(BaseModel):
     impact: str | None = None
     urgency: str | None = None
     reassignment_count: int | None = None
+    reopen_count: int | None = None
+    update_count: int | None = None
+    active: bool | None = None
+    contact_type: str | None = None
+    configuration_item: str | None = None
 
 
 class IncidentQueue(BaseModel):
@@ -26,7 +33,7 @@ class IncidentQueue(BaseModel):
 
 class TimelineEvent(BaseModel):
     observed_at: datetime
-    changes: dict[str, str | None]
+    changes: dict[str, str | int | bool | None]
     snapshot: IncidentSnapshot
 
 
