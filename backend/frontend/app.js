@@ -12,7 +12,7 @@ const currentActions = () => state.actions.filter(a => sameTime(a.replay_as_of,s
 let toastTimer;
 function toast(message,error=false){ const element=$('#toast');element.textContent=message;element.classList.toggle('error',error);element.hidden=false;clearTimeout(toastTimer);toastTimer=setTimeout(()=>element.hidden=true,5000); }
 async function api(path,options={}){
-  const response=await fetch(path,{...options,headers:{'Content-Type':'application/json',...options.headers},signal:AbortSignal.timeout(55000)});
+  const response=await fetch(path,{...options,headers:{'Content-Type':'application/json',...options.headers},signal:AbortSignal.timeout(130000)});
   const data=await response.json();
   if(!response.ok) throw new Error(typeof data.detail==='string'?data.detail:'The request could not be completed. Check the inputs and try again.');
   return data;
@@ -113,7 +113,7 @@ async function analyze(){
 function renderAnalysis(){
   const container=$('#analysis-content');if(!container)return;
   $('#analyze').disabled=state.loading;$('#analyze').innerHTML=state.loading?'<span class="spinner"></span> Analyzing…':'✧ Analyze with Gemma';
-  if(state.loading){container.innerHTML=`<div class="ai-empty"><span class="spinner"></span><h3>Reviewing incident context…</h3><p>${state.mode==='demo'?'Preparing deterministic demo guidance from this snapshot.':'Gemma is reviewing the snapshot and timeline. This may take up to 45 seconds.'}</p></div>`;return;}
+  if(state.loading){container.innerHTML=`<div class="ai-empty"><span class="spinner"></span><h3>Reviewing incident context…</h3><p>${state.mode==='demo'?'Preparing deterministic demo guidance from this snapshot.':'Gemma is reviewing the snapshot and timeline. This may take up to 120 seconds.'}</p></div>`;return;}
   if(state.analysisError){container.innerHTML=`<div class="error-box" role="alert">${esc(state.analysisError)}</div><div class="ai-empty"><h3>Analysis was not completed</h3><p>Your notes and decisions are saved. Retry the request, or choose Demo Mode above.</p></div>`;return;}
   if(!state.analysis){container.innerHTML=`<div class="ai-empty"><div class="ai-orb" aria-hidden="true">✧</div><h3>A second perspective on the incident.</h3><p>Review the available evidence, surface investigation hypotheses, and choose your next steps.</p><div class="capabilities"><span>Snapshot + timeline</span><span>Ranked hypotheses</span><span>Investigation steps</span></div></div><div class="panel-body" style="padding-top:0"><div class="analysis-banner ${state.mode==='live'?'live':''}">${state.mode==='demo'?'Demo Mode is active. Analysis is deterministic and uses real incident metadata. No model inference is performed.':state.config.gemma_configured?'Live mode sends this historical snapshot to the configured model provider.':'Live inference needs server credentials, endpoint, and a deployed Gemma model. Select Demo Mode to run the complete workflow now.'}</div></div>`;return;}
   const a=state.analysis;

@@ -68,6 +68,25 @@ def normalize_analysis(raw: dict[str, Any], provider: str) -> TriageAnalysis:
     return TriageAnalysis(summary=raw.get("summary"), severity=raw.get("severity"), hypotheses=hypotheses, recommended_actions=actions, missing_information=raw.get("missing_information"), human_review_required=True, mode="live", provider=provider)
 
 
+def _parse_analysis_json(content: str) -> dict[str, Any]:
+    decoder = json.JSONDecoder()
+    for start in range(len(content)):
+        if content[start] != "{":
+            continue
+        try:
+            candidate, _ = decoder.raw_decode(content, start)
+        except json.JSONDecodeError:
+            continue
+        if (
+            isinstance(candidate, dict)
+            and "summary" in candidate
+            and ("hypotheses" in candidate or "possible_causes" in candidate)
+            and "recommended_actions" in candidate
+        ):
+            return candidate
+    raise ValueError("No complete triage JSON object found")
+
+
 async def analyze_incident(context: dict[str, Any], mode: str = "live") -> TriageAnalysis:
     if mode == "demo":
         return demo_analysis(context)
@@ -83,10 +102,11 @@ Never infer later outcomes. All possible causes are unverified hypotheses.
 Anonymized category IDs do not identify technologies. There are no logs, metrics,
 or runbooks. State missing evidence; never fabricate runbooks or confidence scores.
 Recommend investigation steps only. The engineer must review every action.
-Return JSON only, with summary (string), severity (recorded priority and any concern),
-hypotheses (1-5 objects: cause, evidence, verification strings), recommended_actions
-(3-5 objects: id, title, reason strings and priority integer), missing_information
-(array of strings), human_review_required (true)."""
+Return only a JSON object, without prose or Markdown, with these fields:
+{"summary":"...","severity":"...","hypotheses":[{"cause":"...","evidence":"...","verification":"..."}],
+"recommended_actions":[{"id":"...","title":"...","reason":"...","priority":1}],
+"missing_information":["..."],"human_review_required":true}
+Include 1-5 hypotheses and 3-5 recommended actions."""
     if provider == "google":
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
         headers = {"x-goog-api-key": api_key}
@@ -112,7 +132,7 @@ hypotheses (1-5 objects: cause, evidence, verification strings), recommended_act
     else:
         raise HTTPException(status_code=503, detail="GEMMA_PROVIDER must be digitalocean or google.")
     try:
-        async with httpx.AsyncClient(timeout=httpx.Timeout(45, connect=10)) as client:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(120, connect=10)) as client:
             response = await client.post(url, headers=headers, json=body)
     except httpx.TimeoutException as exc:
         raise HTTPException(status_code=504, detail="Gemma analysis timed out. Retry or switch to Demo Mode.") from exc
@@ -123,9 +143,6 @@ hypotheses (1-5 objects: cause, evidence, verification strings), recommended_act
     try:
         data = response.json()
         content = data["candidates"][0]["content"]["parts"][0]["text"] if provider == "google" else data["choices"][0]["message"]["content"]
-        content = content.strip()
-        if content.startswith("```"):
-            content = content.split("\n", 1)[1].rsplit("```", 1)[0].strip()
-        return normalize_analysis(json.loads(content), provider_label)
+        return normalize_analysis(_parse_analysis_json(content), provider_label)
     except (AttributeError, KeyError, IndexError, TypeError, ValueError) as exc:
         raise HTTPException(status_code=502, detail="Gemma returned invalid or incomplete analysis JSON. Retry or switch to Demo Mode.") from exc

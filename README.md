@@ -52,7 +52,7 @@ precedence).
 | `GEMMA_PROVIDER` | `google` (default) or `digitalocean` |
 | `GEMMA_ENDPOINT` | Complete HTTPS chat-completions URL for the deployed model; required only for DigitalOcean |
 | `GEMMA_API_KEY` | Server-side provider credential |
-| `GEMMA_MODEL` | Model override; Google defaults to `gemma-4-26b-a4b-it`, verified available to the configured key. |
+| `GEMMA_MODEL` | Model override; Google defaults to `gemma-4-31b-it`, verified available to the configured key. |
 | `RANE_INCIDENTS_CSV` | Optional CSV path; defaults to `incident_event_log.csv` in the repository root |
 | `RANE_ACTIONS_DB` | Optional SQLite database path |
 
@@ -60,7 +60,7 @@ For Google, the backend calls
 `https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent`
 with the API key on the server. The key was verified to list Gemma 4 models,
 and `gemma-4-31b-it` completed a JSON-generation check. This is the default
-model. DigitalOcean's
+model. Google generation may take up to 120 seconds. DigitalOcean's
 [inference endpoint documentation](https://docs.digitalocean.com/products/inference/how-to/si-endpoints/)
 describes its chat endpoint at
 `https://inference.do-ai.run/v1/chat/completions`; DigitalOcean requires its

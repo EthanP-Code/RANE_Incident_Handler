@@ -114,7 +114,7 @@ def test_google_live_request_uses_model_generate_content_endpoint(dataset, monke
         result = gemma.demo_analysis(context).model_dump(exclude={"mode", "provider"})
         return httpx.Response(
             200,
-            json={"candidates": [{"content": {"parts": [{"text": json.dumps(result)}]}}]},
+            json={"candidates": [{"content": {"parts": [{"text": "Here is the requested JSON:\n```json\n" + json.dumps(result) + "\n```"}]}}]},
         )
 
     monkeypatch.setattr(gemma.httpx, "AsyncClient", lambda **kwargs: original(transport=httpx.MockTransport(google), **kwargs))
