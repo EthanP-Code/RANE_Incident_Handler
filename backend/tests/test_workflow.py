@@ -95,6 +95,33 @@ def test_google_default_model_is_configured_by_key_alone(monkeypatch):
     assert config["default_mode"] == "live"
 
 
+def test_google_response_accepts_one_or_more_model_recommendations():
+    result = gemma.normalize_analysis(
+        {
+            "summary": "Investigate the reported incident.",
+            "severity": "P1 - Critical",
+            "hypotheses": [
+                {
+                    "cause": "Ownership ambiguity",
+                    "evidence": "The assignment group changed.",
+                    "verification": "Confirm the responsible team.",
+                }
+            ],
+            "recommended_actions": [
+                {
+                    "title": "Confirm investigation ownership",
+                    "reason": "The current owner is not established.",
+                }
+            ],
+            "missing_information": ["Affected service"],
+        },
+        "Google / Gemma",
+    )
+
+    assert len(result.recommended_actions) == 1
+    assert result.recommended_actions[0].title == "Confirm investigation ownership"
+
+
 def test_google_live_request_uses_model_generate_content_endpoint(dataset, monkeypatch):
     monkeypatch.setenv("GEMMA_API_KEY", "test-google-key")
     monkeypatch.delenv("GEMMA_PROVIDER", raising=False)

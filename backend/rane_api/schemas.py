@@ -62,7 +62,7 @@ class TriageAnalysis(BaseModel):
     severity: str = Field(min_length=1, max_length=500)
     hypotheses: list[PossibleCause] = Field(min_length=1, max_length=5)
     missing_information: list[str] = Field(min_length=1, max_length=15)
-    recommended_actions: list[RecommendedAction] = Field(min_length=3, max_length=5)
+    recommended_actions: list[RecommendedAction] = Field(min_length=1, max_length=5)
     human_review_required: Literal[True]
     mode: Literal["live", "demo"] = "live"
     provider: str = "DigitalOcean / Gemma"

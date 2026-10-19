@@ -106,7 +106,8 @@ Return only a JSON object, without prose or Markdown, with these fields:
 {"summary":"...","severity":"...","hypotheses":[{"cause":"...","evidence":"...","verification":"..."}],
 "recommended_actions":[{"id":"...","title":"...","reason":"...","priority":1}],
 "missing_information":["..."],"human_review_required":true}
-Include 1-5 hypotheses and 3-5 recommended actions."""
+Include 1-5 hypotheses and 1-5 recommended actions; aim for three useful
+actions when supported by the incident evidence."""
     if provider == "google":
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
         headers = {"x-goog-api-key": api_key}
