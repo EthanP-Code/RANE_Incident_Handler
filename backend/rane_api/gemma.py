@@ -9,6 +9,48 @@ from fastapi import HTTPException
 from .schemas import TriageAnalysis
 
 DEFAULT_GOOGLE_GEMMA_MODEL = "gemma-4-31b-it"
+GOOGLE_TRIAGE_SCHEMA = {
+    "type": "OBJECT",
+    "properties": {
+        "summary": {"type": "STRING"},
+        "severity": {"type": "STRING"},
+        "hypotheses": {
+            "type": "ARRAY",
+            "items": {
+                "type": "OBJECT",
+                "properties": {
+                    "cause": {"type": "STRING"},
+                    "evidence": {"type": "STRING"},
+                    "verification": {"type": "STRING"},
+                },
+                "required": ["cause", "evidence", "verification"],
+            },
+        },
+        "recommended_actions": {
+            "type": "ARRAY",
+            "items": {
+                "type": "OBJECT",
+                "properties": {
+                    "id": {"type": "STRING"},
+                    "title": {"type": "STRING"},
+                    "reason": {"type": "STRING"},
+                    "priority": {"type": "INTEGER"},
+                },
+                "required": ["id", "title", "reason", "priority"],
+            },
+        },
+        "missing_information": {"type": "ARRAY", "items": {"type": "STRING"}},
+        "human_review_required": {"type": "BOOLEAN"},
+    },
+    "required": [
+        "summary",
+        "severity",
+        "hypotheses",
+        "recommended_actions",
+        "missing_information",
+        "human_review_required",
+    ],
+}
 
 
 def provider_config() -> dict[str, Any]:
@@ -119,7 +161,11 @@ actions when supported by the incident evidence."""
                     ]
                 }
             ],
-            "generationConfig": {"responseMimeType": "application/json"},
+            "generationConfig": {
+                "responseMimeType": "application/json",
+                "responseSchema": GOOGLE_TRIAGE_SCHEMA,
+                "maxOutputTokens": 4096,
+            },
         }
         provider_label = "Google / Gemma"
     elif provider == "digitalocean":

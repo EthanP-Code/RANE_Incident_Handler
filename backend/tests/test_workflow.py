@@ -135,6 +135,14 @@ def test_google_live_request_uses_model_generate_content_endpoint(dataset, monke
         assert request.headers["x-goog-api-key"] == "test-google-key"
         body = json.loads(request.content)
         assert body["generationConfig"]["responseMimeType"] == "application/json"
+        assert body["generationConfig"]["responseSchema"]["required"] == [
+            "summary",
+            "severity",
+            "hypotheses",
+            "recommended_actions",
+            "missing_information",
+            "human_review_required",
+        ]
         context = json.loads(body["contents"][0]["parts"][0]["text"].split("Incident context:\n", 1)[1])
         assert "Future" not in json.dumps(context)
         assert "resolved_at" not in json.dumps(context)
