@@ -49,10 +49,10 @@ precedence).
 
 | Variable | Purpose |
 | --- | --- |
-| `GEMMA_PROVIDER` | `google` (default) or `digitalocean` |
-| `GEMMA_ENDPOINT` | Complete HTTPS chat-completions URL for the deployed model; required only for DigitalOcean |
+| `GEMMA_PROVIDER` | `google` (default locally) or `digitalocean` |
+| `GEMMA_ENDPOINT` | Complete HTTPS chat-completions URL; DigitalOcean defaults to `https://inference.do-ai.run/v1/chat/completions` |
 | `GEMMA_API_KEY` | Server-side provider credential |
-| `GEMMA_MODEL` | Model override; Google defaults to `gemma-4-31b-it`, verified available to the configured key. |
+| `GEMMA_MODEL` | Model override; Google defaults to `gemma-4-31b-it`; DigitalOcean defaults to `gemma-4-31B-it`. |
 | `RANE_INCIDENTS_CSV` | Optional CSV path; defaults to `incident_event_log.csv` in the repository root |
 | `RANE_ACTIONS_DB` | Optional SQLite database path |
 
@@ -64,11 +64,34 @@ model. Google generation may take up to 120 seconds. DigitalOcean's
 [inference endpoint documentation](https://docs.digitalocean.com/products/inference/how-to/si-endpoints/)
 describes its chat endpoint at
 `https://inference.do-ai.run/v1/chat/completions`; DigitalOcean requires its
-own authorized credential and a model ID supported by that account.
+own model access key and a supported model ID. Its Gemma 4 catalog ID is
+`gemma-4-31B-it`. Do not reuse a Google key for DigitalOcean.
 
 Configuration presence does not prove that inference succeeds; verify the
 deployment before presenting it as live inference. Live provider failures are
 explicit and never silently substituted with demo output.
+
+## Deploy to DigitalOcean App Platform
+
+The repository includes a Dockerfile and App Platform spec for deploying the
+`main` branch of `EthanP-Code/RANE_Incident_Handler`. After installing and
+authenticating `doctl` with an account that can create apps and access that
+GitHub repository, create the app with:
+
+```sh
+doctl apps create --spec .do/app.yaml
+```
+
+The app spec selects DigitalOcean Gemma and its documented serverless endpoint,
+but intentionally does not contain a credential. Add a newly generated
+DigitalOcean **model access key** as the `GEMMA_API_KEY` secret in the App
+Platform console, then redeploy. The model access key does not grant permission
+to create or manage the App Platform app. The key previously pasted into chat
+must be revoked and replaced; never place it in source control or the app spec.
+
+The SQLite activity database uses the container filesystem and is not durable
+across App Platform redeployments or instance replacement. Configure external
+persistent storage before relying on activity history in production.
 
 ## Replay and data integrity
 

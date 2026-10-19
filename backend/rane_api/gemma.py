@@ -9,6 +9,8 @@ from fastapi import HTTPException
 from .schemas import TriageAnalysis
 
 DEFAULT_GOOGLE_GEMMA_MODEL = "gemma-4-31b-it"
+DEFAULT_DIGITALOCEAN_GEMMA_MODEL = "gemma-4-31B-it"
+DEFAULT_DIGITALOCEAN_ENDPOINT = "https://inference.do-ai.run/v1/chat/completions"
 GOOGLE_TRIAGE_SCHEMA = {
     "type": "OBJECT",
     "properties": {
@@ -56,13 +58,16 @@ GOOGLE_TRIAGE_SCHEMA = {
 def provider_config() -> dict[str, Any]:
     provider = os.getenv("GEMMA_PROVIDER", "google").lower()
     key = os.getenv("GEMMA_API_KEY", "")
-    model = (
-        os.getenv("GEMMA_MODEL")
-        or os.getenv("GEMINI_MODEL")
-        or (DEFAULT_GOOGLE_GEMMA_MODEL if provider == "google" else "")
-    )
+    model = os.getenv("GEMMA_MODEL")
+    if not model and provider == "google":
+        model = os.getenv("GEMINI_MODEL") or DEFAULT_GOOGLE_GEMMA_MODEL
+    elif not model and provider == "digitalocean":
+        model = DEFAULT_DIGITALOCEAN_GEMMA_MODEL
+    model = model or ""
     model = model.removeprefix("models/")
-    endpoint = os.getenv("GEMMA_ENDPOINT", "")
+    endpoint = os.getenv("GEMMA_ENDPOINT") or (
+        DEFAULT_DIGITALOCEAN_ENDPOINT if provider == "digitalocean" else ""
+    )
     configured = bool(key and model and (endpoint or provider == "google"))
     return {
         "gemma_configured": configured,
@@ -169,7 +174,7 @@ actions when supported by the incident evidence."""
         }
         provider_label = "Google / Gemma"
     elif provider == "digitalocean":
-        url = os.environ["GEMMA_ENDPOINT"]
+        url = os.getenv("GEMMA_ENDPOINT") or DEFAULT_DIGITALOCEAN_ENDPOINT
         parsed = urlparse(url)
         if parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password:
             raise HTTPException(status_code=503, detail="GEMMA_ENDPOINT must be a complete HTTPS chat completions URL.")

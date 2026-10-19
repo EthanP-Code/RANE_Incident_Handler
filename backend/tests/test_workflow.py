@@ -95,6 +95,42 @@ def test_google_default_model_is_configured_by_key_alone(monkeypatch):
     assert config["default_mode"] == "live"
 
 
+def test_digitalocean_defaults_use_catalog_model_and_endpoint(dataset, monkeypatch):
+    monkeypatch.setenv("GEMMA_PROVIDER", "digitalocean")
+    monkeypatch.setenv("GEMMA_API_KEY", "test-do-model-access-key")
+    monkeypatch.delenv("GEMMA_MODEL", raising=False)
+    monkeypatch.delenv("GEMMA_ENDPOINT", raising=False)
+    original = httpx.AsyncClient
+
+    def digitalocean(request):
+        assert request.url == "https://inference.do-ai.run/v1/chat/completions"
+        assert request.headers["Authorization"] == "Bearer test-do-model-access-key"
+        body = json.loads(request.content)
+        assert body["model"] == "gemma-4-31B-it"
+        context = json.loads(body["messages"][1]["content"])
+        analysis = gemma.demo_analysis(context).model_dump(exclude={"mode", "provider"})
+        return httpx.Response(
+            200,
+            json={"choices": [{"message": {"content": json.dumps(analysis)}}]},
+        )
+
+    monkeypatch.setattr(
+        gemma.httpx,
+        "AsyncClient",
+        lambda **kwargs: original(
+            transport=httpx.MockTransport(digitalocean), **kwargs
+        ),
+    )
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/incidents/INC0025693/analyze?mode=live&as_of=2016-05-04T08:59:00Z"
+        )
+
+    assert response.status_code == 200
+    assert response.json()["provider"] == "DigitalOcean / Gemma"
+
+
 def test_google_response_accepts_one_or_more_model_recommendations():
     result = gemma.normalize_analysis(
         {

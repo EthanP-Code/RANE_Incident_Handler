@@ -1,0 +1,22 @@
+name: rane-incident-handler
+region: nyc
+services:
+  - name: web
+    github:
+      repo: EthanP-Code/RANE_Incident_Handler
+      branch: main
+      deploy_on_push: true
+    dockerfile_path: Dockerfile
+    http_port: 8080
+    instance_size_slug: basic-xxs
+    instance_count: 1
+    envs:
+      - key: GEMMA_PROVIDER
+        value: digitalocean
+        scope: RUN_TIME
+      - key: GEMMA_ENDPOINT
+        value: https://inference.do-ai.run/v1/chat/completions
+        scope: RUN_TIME
+      - key: GEMMA_MODEL
+        value: gemma-4-31B-it
+        scope: RUN_TIME
