@@ -80,6 +80,53 @@ def configure_mock(monkeypatch, handler):
     monkeypatch.setattr(gemma.httpx, "AsyncClient", lambda **kwargs: original(transport=httpx.MockTransport(handler), **kwargs))
 
 
+def test_google_default_model_is_configured_by_key_alone(monkeypatch):
+    monkeypatch.setenv("GEMMA_API_KEY", "test-google-key")
+    monkeypatch.delenv("GEMMA_PROVIDER", raising=False)
+    monkeypatch.delenv("GEMMA_MODEL", raising=False)
+    monkeypatch.delenv("GEMINI_MODEL", raising=False)
+    monkeypatch.delenv("GEMMA_ENDPOINT", raising=False)
+
+    config = gemma.provider_config()
+
+    assert config["provider"] == "google"
+    assert config["model"] == "gemma-4-31b-it"
+    assert config["gemma_configured"] is True
+    assert config["default_mode"] == "live"
+
+
+def test_google_live_request_uses_model_generate_content_endpoint(dataset, monkeypatch):
+    monkeypatch.setenv("GEMMA_API_KEY", "test-google-key")
+    monkeypatch.delenv("GEMMA_PROVIDER", raising=False)
+    monkeypatch.delenv("GEMMA_MODEL", raising=False)
+    monkeypatch.delenv("GEMINI_MODEL", raising=False)
+    monkeypatch.delenv("GEMMA_ENDPOINT", raising=False)
+    original = httpx.AsyncClient
+
+    def google(request):
+        assert request.url == "https://generativelanguage.googleapis.com/v1beta/models/gemma-4-31b-it:generateContent"
+        assert request.headers["x-goog-api-key"] == "test-google-key"
+        body = json.loads(request.content)
+        assert body["generationConfig"]["responseMimeType"] == "application/json"
+        context = json.loads(body["contents"][0]["parts"][0]["text"].split("Incident context:\n", 1)[1])
+        assert "Future" not in json.dumps(context)
+        assert "resolved_at" not in json.dumps(context)
+        result = gemma.demo_analysis(context).model_dump(exclude={"mode", "provider"})
+        return httpx.Response(
+            200,
+            json={"candidates": [{"content": {"parts": [{"text": json.dumps(result)}]}}]},
+        )
+
+    monkeypatch.setattr(gemma.httpx, "AsyncClient", lambda **kwargs: original(transport=httpx.MockTransport(google), **kwargs))
+
+    with TestClient(app) as client:
+        response = client.post("/api/incidents/INC0025693/analyze?mode=live&as_of=2016-05-04T08:59:00Z")
+
+    assert response.status_code == 200
+    assert response.json()["mode"] == "live"
+    assert response.json()["provider"] == "Google / Gemma"
+
+
 def test_live_provider_contract_and_no_future_information(dataset, monkeypatch):
     def provider(request):
         assert request.headers["Authorization"] == "Bearer test-secret-never-public"

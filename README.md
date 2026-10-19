@@ -44,20 +44,31 @@ Do not interpret category/symptom IDs as readable descriptions.
 
 The default is Demo Mode unless live provider configuration is complete. Copy
 `.env.example` to `.env`, set server-side values, and restart the application.
-`run.py` loads the root `.env` file.
+`run.py` loads both the root `.env` and `backend/.env` (root values take
+precedence).
 
 | Variable | Purpose |
 | --- | --- |
-| `GEMMA_PROVIDER` | `digitalocean` (default) or `google` |
-| `GEMMA_ENDPOINT` | Complete HTTPS chat-completions URL for the deployed model; required for DigitalOcean |
+| `GEMMA_PROVIDER` | `google` (default) or `digitalocean` |
+| `GEMMA_ENDPOINT` | Complete HTTPS chat-completions URL for the deployed model; required only for DigitalOcean |
 | `GEMMA_API_KEY` | Server-side provider credential |
-| `GEMMA_MODEL` | Deployed model ID |
+| `GEMMA_MODEL` | Model override; Google defaults to `gemma-4-26b-a4b-it`, verified available to the configured key. |
 | `RANE_INCIDENTS_CSV` | Optional CSV path; defaults to `incident_event_log.csv` in the repository root |
 | `RANE_ACTIONS_DB` | Optional SQLite database path |
 
-Configuration presence does not prove that the endpoint works or hosts Gemma;
-verify the deployment before presenting it as live inference. Live provider
-failures are explicit and never silently substituted with demo output.
+For Google, the backend calls
+`https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent`
+with the API key on the server. The key was verified to list Gemma 4 models,
+and `gemma-4-31b-it` completed a JSON-generation check. This is the default
+model. DigitalOcean's
+[inference endpoint documentation](https://docs.digitalocean.com/products/inference/how-to/si-endpoints/)
+describes its chat endpoint at
+`https://inference.do-ai.run/v1/chat/completions`; DigitalOcean requires its
+own authorized credential and a model ID supported by that account.
+
+Configuration presence does not prove that inference succeeds; verify the
+deployment before presenting it as live inference. Live provider failures are
+explicit and never silently substituted with demo output.
 
 ## Replay and data integrity
 
